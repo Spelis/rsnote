@@ -1,0 +1,25 @@
+# Rust build stuff
+/target/
+**/*.rs.bk
+
+# IDEs/editors
+/.idea/
+/.vscode/
+/*.code-workspace
+
+# Mac & Linux noise
+.DS_Store
+*.swp
+*.swo
+
+# Binaries
+*.exe
+*.out
+*.bin
+
+# Cargo things
+/Cargo.lock
+.cargo/
+
+# Logs
+*.log
