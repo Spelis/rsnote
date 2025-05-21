@@ -55,10 +55,6 @@ fn main() {
     if args[2] == "init" {
         let filename = args.get(1).expect("Filename required");
 
-        // TODO: Remove this, it's temporary for dev purposes.:
-        fs::create_dir_all("notes/").expect("Failed to create notes dir.");
-        let filename = format!("notes/{}", filename);
-
         fs::File::create(&filename).expect("Failure. \n");
 
         let data = Notes {
@@ -73,9 +69,6 @@ fn main() {
     }
     if args[2] == "list" {
         let filename = args.get(1).expect("Filename required");
-        // TODO: Remove this, it's temporary for dev purposes.:
-        fs::create_dir_all("notes/").expect("Failed to create notes dir.");
-        let filename = format!("notes/{}", filename);
 
         let content = fs::read_to_string(filename).expect("Failed to read the note file.");
         let notes: Notes = serde_json::from_str(&content).unwrap();
@@ -87,9 +80,6 @@ fn main() {
     }
     if args[2] == "new" {
         let filename = args.get(1).expect("Filename required");
-        // TODO: Remove this, it's temporary for dev purposes.:
-        fs::create_dir_all("notes/").expect("Failed to create notes dir.");
-        let filename = format!("notes/{}", filename);
 
         let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
         let mut notes: Notes = serde_json::from_str(&content).unwrap();
@@ -113,10 +103,6 @@ fn main() {
             .parse::<usize>()
             .expect("Index must be a number");
 
-        // TODO: Remove this, it's temporary for dev purposes.:
-        fs::create_dir_all("notes/").expect("Failed to create notes dir.");
-        let filename = format!("notes/{}", filename);
-
         let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
         let mut notes: Notes = serde_json::from_str(&content).unwrap();
 
@@ -139,10 +125,6 @@ fn main() {
             .parse::<usize>()
             .expect("Index must be a number");
 
-        // TODO: Remove this, it's temporary for dev purposes.:
-        fs::create_dir_all("notes/").expect("Failed to create notes dir.");
-        let filename = format!("notes/{}", filename);
-
         let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
         let mut notes: Notes = serde_json::from_str(&content).unwrap();
 
@@ -155,10 +137,6 @@ fn main() {
     if args[2] == "search" {
         let filename = args.get(1).expect("Filename required");
         let keyword = args.get(3).expect("Keyword(s) required.");
-
-        // TODO: Remove this, it's temporary for dev purposes.:
-        fs::create_dir_all("notes/").expect("Failed to create notes dir.");
-        let filename = format!("notes/{}", filename);
 
         let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
         let notes: Notes = serde_json::from_str(&content).unwrap();
@@ -183,10 +161,6 @@ fn main() {
             .expect("Index required")
             .parse::<usize>()
             .expect("Index must be a number");
-
-        // TODO: Remove this, it's temporary for dev purposes.:
-        fs::create_dir_all("notes/").expect("Failed to create notes dir.");
-        let filename = format!("notes/{}", filename);
 
         let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
         let notes: Notes = serde_json::from_str(&content).unwrap();
