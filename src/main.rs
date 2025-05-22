@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::env::temp_dir;
 use std::fs;
 use std::process::Command;
 use std::process::exit;
 
-fn open() {
+fn open(path: String) {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
     Command::new(editor)
-        .arg("/tmp/rsnote.txt")
+        .arg(path)
         .status()
         .expect("Failed to open editor");
 }
@@ -51,10 +52,10 @@ fn main() {
         eprintln!("Commands:\ninit, list, new, edit, delete, search, full");
         exit(1);
     }
+    let tmpfile = &temp_dir().join("rsnote.txt").display().to_string();
+    let filename = args.get(1).expect("Filename required");
 
     if args[2] == "init" {
-        let filename = args.get(1).expect("Filename required");
-
         fs::File::create(&filename).expect("Failure. \n");
 
         let data = Notes {
@@ -68,8 +69,6 @@ fn main() {
         println!("Successfully initialized Note with name {}", filename);
     }
     if args[2] == "list" {
-        let filename = args.get(1).expect("Filename required");
-
         let content = fs::read_to_string(filename).expect("Failed to read the note file.");
         let notes: Notes = serde_json::from_str(&content).unwrap();
 
@@ -79,15 +78,12 @@ fn main() {
         }
     }
     if args[2] == "new" {
-        let filename = args.get(1).expect("Filename required");
-
         let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
         let mut notes: Notes = serde_json::from_str(&content).unwrap();
 
-        fs::write("/tmp/rsnote.txt", String::new()).expect("Failed to create tempfile.");
-        open();
-        let content =
-            fs::read_to_string("/tmp/rsnote.txt").expect("Failed to read tempfile content.");
+        fs::write(tmpfile, String::new()).expect("Failed to create tempfile.");
+        open(tmpfile.to_string());
+        let content = fs::read_to_string(tmpfile).expect("Failed to read tempfile content.");
 
         notes.notes.push(content);
 
@@ -96,7 +92,6 @@ fn main() {
         println!("Successfully created the note");
     }
     if args[2] == "edit" {
-        let filename = args.get(1).expect("Filename required");
         let index = args
             .get(3)
             .expect("Index required")
@@ -106,10 +101,9 @@ fn main() {
         let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
         let mut notes: Notes = serde_json::from_str(&content).unwrap();
 
-        fs::write("/tmp/rsnote.txt", &notes.notes[index]).expect("Failed to create tempfile.");
-        open();
-        let content =
-            fs::read_to_string("/tmp/rsnote.txt").expect("Failed to read tempfile content.");
+        fs::write(tmpfile, &notes.notes[index]).expect("Failed to create tempfile.");
+        open(tmpfile.to_string());
+        let content = fs::read_to_string(tmpfile).expect("Failed to read tempfile content.");
 
         notes.notes[index] = content;
 
@@ -118,7 +112,6 @@ fn main() {
         println!("Successfully edited the note");
     }
     if args[2] == "delete" {
-        let filename = args.get(1).expect("Filename required");
         let index = args
             .get(3)
             .expect("Index required")
@@ -135,7 +128,6 @@ fn main() {
         println!("Successfully deleted the note");
     }
     if args[2] == "search" {
-        let filename = args.get(1).expect("Filename required");
         let keyword = args.get(3).expect("Keyword(s) required.");
 
         let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
@@ -155,7 +147,6 @@ fn main() {
         }
     }
     if args[2] == "read" {
-        let filename = args.get(1).expect("Filename required");
         let index = args
             .get(3)
             .expect("Index required")
