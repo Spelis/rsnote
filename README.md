@@ -1,12 +1,13 @@
-# RSNote - Simple and minimal note taking app cli, built in Rust
+# RSNote - Simple Note taking app in Rust
 
-Very easy to use CLI for creating, editing and searching through notes.
+Very simple Command Line Interface to create, list, edit, and search through notes.
 
 ## Building:
 
-Release:
-`cargo build --release`
-`./target/release/rsnote <args>`
+`cargo build` to build with debug (add `--release` for a release build)
 
-Debug:
+then run with `./target/release or debug/rsnote`
+
+or:
+
 `cargo run -- <args>`

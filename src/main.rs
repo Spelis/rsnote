@@ -1,161 +1,340 @@
+use chrono::Local;
+use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
-use std::env;
-use std::env::temp_dir;
-use std::fs;
-use std::process::Command;
+use std::collections::HashMap;
+use std::io;
+use std::io::Write;
+use std::process::Command as ProcCommand;
 use std::process::exit;
+use std::{env, fs};
 
-fn open(path: String) {
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
-    Command::new(editor)
-        .arg(path)
-        .status()
-        .expect("Failed to open editor");
+fn write_notes(file: &str, data: Notes) {
+    fs::write(&file, serde_json::to_string(&data).unwrap()).expect("❌ Failed to write.");
 }
 
-fn index_of<T: PartialEq>(list: &[T], target: &T) -> isize {
-    match list.iter().position(|x| x == target) {
-        Some(idx) => idx as isize,
-        None => -1,
+fn read_notes(file: &str) -> Notes {
+    let content = fs::read_to_string(file).expect("❌ Failed to read.");
+    return serde_json::from_str(&content).unwrap();
+}
+
+fn trim_multiline(input: &str) -> String {
+    let lines = input.lines().collect::<Vec<_>>();
+    let first = lines.iter().position(|l| !l.trim().is_empty()).unwrap_or(0);
+    let last = lines
+        .iter()
+        .rposition(|l| !l.trim().is_empty())
+        .unwrap_or(0);
+    lines[first..=last].join("\n")
+}
+
+fn input(prompt: &str) -> String {
+    let mut input = String::new();
+    print!("{}", prompt);
+    let _ = io::stdout().flush();
+    io::stdin()
+        .read_line(&mut input)
+        .expect("❌ Unable to read user input");
+    input.trim().to_string()
+}
+
+fn open_editor(path: &std::path::Path) -> std::io::Result<()> {
+    let editors = [
+        "nvim", "vim", "nano", "vi", "edit", // Microsoft's new text editor
+    ];
+
+    for editor in editors {
+        if which::which(editor).is_ok() {
+            ProcCommand::new(editor).arg(path).status()?;
+            return Ok(());
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "❌ No suitable editor found in $PATH.",
+    ))
+}
+
+fn cmd_init(file: String, _args: Vec<String>) {
+    fs::File::create(&file).expect("❌ Failed to create file.\n");
+    let data = Notes(vec![]);
+    write_notes(&file, data);
+    println!("✅ Notefile initialized: {}", &file);
+}
+fn cmd_list(file: String, _args: Vec<String>) {
+    let notes: Notes = read_notes(&file);
+    for note in notes.0.iter() {
+        println!("Note {}: {}", &note.id, &note.title)
+    }
+}
+fn cmd_new(file: String, args: Vec<String>) {
+    let mut notes: Notes = read_notes(&file);
+    let id = args
+        .get(0)
+        .expect("❌ ID Required, can be number or string.");
+
+    if notes.0.iter().any(|n| n.id == *id) {
+        eprintln!("❌ Note with id {} already exists.", id);
+        return;
+    }
+
+    let mut tmp = tempfile::NamedTempFile::new().expect("❌ failed to create temp file.");
+    writeln!(tmp, "<title>\n\n<body>").expect("❌ Failed to write");
+    open_editor(tmp.path()).expect("❌ Failed to open");
+    let content = fs::read_to_string(tmp).expect("❌ Failed to read");
+    let title = content.lines().next().unwrap_or("Untitled");
+    let body = trim_multiline(&content);
+    if body == "<body>" && title == "<title>" {
+        println!("❌ Did not create empty note.");
+        return;
+    }
+    let now = Local::now().timestamp() as u64;
+    notes.0.push(Note {
+        title: title.into(),
+        body: body,
+        id: id.to_string(),
+        created_at: now,
+        edited_at: now,
+        tags: vec![],
+    });
+    write_notes(&file, notes);
+    println!("✅ Successfully created {}", id);
+}
+fn cmd_edit(file: String, args: Vec<String>) {
+    let mut notes: Notes = read_notes(&file);
+    let id = args
+        .get(0)
+        .expect("❌ ID Required, can be number or string.");
+
+    let Some(note) = notes.0.iter_mut().find(|n| &n.id == id) else {
+        eprintln!("❌ Note with ID '{}' not found.", id);
+        return;
+    };
+
+    let mut tmp = tempfile::NamedTempFile::new().expect("❌ Failed to create temp file.");
+    writeln!(tmp, "{}\n\n{}", note.title, note.body).expect("❌ Failed to write");
+    open_editor(tmp.path()).expect("❌ Failed to open");
+    let content = fs::read_to_string(tmp).expect("❌ Failed to read");
+    let title = content.lines().next().unwrap_or("Untitled");
+    let body = trim_multiline(&content);
+    if body == "<body>" && title == "<title>" {
+        println!("❌ Did not create empty note.");
+        return;
+    }
+    note.title = title.to_string();
+    note.body = body;
+    note.edited_at = Local::now().timestamp() as u64;
+    if input("Are you sure you want to edit? (y/N): ").eq_ignore_ascii_case("y") {
+        write_notes(&file, notes);
+    }
+    println!("✅ Successfully edited {}", id);
+}
+
+fn cmd_delete(file: String, args: Vec<String>) {
+    let mut notes: Notes = read_notes(&file);
+    let id = args
+        .get(0)
+        .expect("❌ ID Required, can be number or string.");
+    if input("Are you sure? (y/N): ").eq_ignore_ascii_case("y") {
+        let noteidx = notes
+            .0
+            .iter()
+            .position(|n| &n.id == id)
+            .expect("❌ Note not found.");
+        notes.0.remove(noteidx);
+        write_notes(&file, notes);
+        println!("✅ Successfully deleted {}", id);
+    } else {
+        println!("✅ Canceled.");
     }
 }
 
-fn search_notes<'a>(notes: &'a [String], query: &str) -> Vec<(usize, &'a String)> {
-    notes
+fn cmd_search(file: String, args: Vec<String>) {
+    let notes: Notes = read_notes(&file);
+    let query = args.get(0).map(|s| s.as_str()).unwrap_or("").to_lowercase();
+
+    if query.is_empty() {
+        println!("❌ No query provided.");
+        return;
+    }
+
+    fn highlight(text: &str, query: &str) -> String {
+        let mut result = String::new();
+        let mut remaining = text.to_string();
+        let query_lc = query.to_lowercase();
+
+        while let Some(pos) = remaining.to_lowercase().find(&query_lc) {
+            let (before, rest) = remaining.split_at(pos);
+            let (matched, after) = rest.split_at(query.len());
+            result.push_str(before);
+            result.push_str("\x1b[31m"); // red
+            result.push_str(matched);
+            result.push_str("\x1b[0m"); // reset
+            remaining = after.to_string();
+        }
+        result.push_str(&remaining);
+        result
+    }
+
+    let result: Vec<(usize, &Note)> = notes
+        .0
         .iter()
         .enumerate()
-        .filter(|(_, note)| note.contains(query))
-        .collect()
+        .filter(|(_, note)| {
+            note.title.to_lowercase().contains(&query)
+                || note.body.to_lowercase().contains(&query)
+                || note.id.to_lowercase().contains(&query)
+        })
+        .collect();
+
+    println!(
+        "🔍 Search for \"{}\" returned {} results:",
+        query,
+        result.len()
+    );
+
+    for (_, note) in result {
+        println!(
+            "{}: {}",
+            highlight(&note.id, &query),
+            highlight(&note.title, &query)
+        );
+        for line in note.body.lines() {
+            println!("    {}", highlight(line, &query));
+        }
+    }
 }
 
-// File format:
-//
-// "filetype": "rsnote-vault" NOTE: not encrypted, used as "header".
-// "notes": [
-//  "this is a text body, cry about it bitch." NOTE: each string is its own note, 0-indexed the title is considered until the first newline
-//  OR like the first 25 characters
-// ]
+fn cmd_info(file: String, args: Vec<String>) {
+    let mut notes: Notes = read_notes(&file);
+    let id = args
+        .get(0)
+        .expect("❌ ID Required, can be number or string.");
 
-// TODO: for editing (and creating new) notes, do something like git where it creates a tempfile
-// and opens in a text editor the user chooses.
+    let Some(note) = notes.0.iter_mut().find(|n| &n.id == id) else {
+        eprintln!("❌ Note with ID '{}' not found.", id);
+        return;
+    };
+
+    println!("ℹ️ Info for note {}:", note.id);
+    println!("    Title: {}", note.title);
+    println!("    Body:");
+    for line in note.body.lines() {
+        println!("        {}", line);
+    }
+    println!(
+        "    Last Modified: {}",
+        Local
+            .timestamp_opt(note.edited_at as i64, 0)
+            .single()
+            .unwrap()
+            .format("%Y-%m-%d %H:%M:%S")
+    );
+    println!(
+        "    Created at:    {}",
+        Local
+            .timestamp_opt(note.created_at as i64, 0)
+            .single()
+            .unwrap()
+            .format("%Y-%m-%d %H:%M:%S")
+    );
+}
 
 #[derive(Serialize, Deserialize)]
-struct Notes {
-    filetype: String,
-    notes: Vec<String>,
+struct Note {
+    title: String,
+    body: String,
+    id: String,
+    created_at: u64,
+    edited_at: u64,
+    tags: Vec<String>,
 }
+
+struct Command {
+    func: fn(String, Vec<String>),
+    usage: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Notes(pub Vec<Note>);
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    let mut commands: HashMap<String, Command> = HashMap::new();
+    commands.insert(
+        "init".into(),
+        Command {
+            func: cmd_init,
+            usage: "".into(),
+        },
+    );
+    commands.insert(
+        "list".into(),
+        Command {
+            func: cmd_list,
+            usage: "".into(),
+        },
+    );
+    commands.insert(
+        "new".into(),
+        Command {
+            func: cmd_new,
+            usage: "<id>".into(),
+        },
+    );
+    commands.insert(
+        "edit".into(),
+        Command {
+            func: cmd_edit,
+            usage: "<id>".into(),
+        },
+    );
+    commands.insert(
+        "delete".into(),
+        Command {
+            func: cmd_delete,
+            usage: "<id>".into(),
+        },
+    );
+    commands.insert(
+        "search".into(),
+        Command {
+            func: cmd_search,
+            usage: "<query>".into(),
+        },
+    );
+    commands.insert(
+        "info".into(),
+        Command {
+            func: cmd_info,
+            usage: "<id>".into(),
+        },
+    );
     if args.len() <= 2 {
-        eprintln!("RSNote Usage: rsnote <notefile> <cmd> [opts]");
-        eprintln!("Commands:\ninit, list, new, edit, delete, search, full");
+        eprintln!(
+            "❌ Not enough arguments, you need at least 2. (you supplied {})",
+            args.len() - 1
+        );
+        eprintln!("RSNote Usage: rsnote <file> <cmd> [opts]");
+        eprintln!("Available commands:");
+        for (name, command) in commands {
+            eprintln!("    {} {}", name, command.usage);
+        }
         exit(1);
     }
-    let tmpfile = &temp_dir().join("rsnote.txt").display().to_string();
-    let filename = args.get(1).expect("Filename required");
-
-    if args[2] == "init" {
-        fs::File::create(&filename).expect("Failure. \n");
-
-        let data = Notes {
-            filetype: String::from("rsnote-vault"), // Required!
-            notes: vec![],
-        };
-
-        fs::write(&filename, serde_json::to_string_pretty(&data).unwrap())
-            .expect("Failed to write");
-
-        println!("Successfully initialized Note with name {}", filename);
-    }
-    if args[2] == "list" {
-        let content = fs::read_to_string(filename).expect("Failed to read the note file.");
-        let notes: Notes = serde_json::from_str(&content).unwrap();
-
-        for note in &notes.notes {
-            let (title, _body) = note.split_once("\n").unwrap_or((note, ""));
-            println!("Note {}: {}...", index_of(&notes.notes, note), title);
+    let filename = args
+        .get(1)
+        .expect("No filename (weird, this should NEVER happen)");
+    let cmd_name = args.get(2).expect("❌ No command provided.");
+    let command = match commands.get(cmd_name) {
+        Some(c) => c,
+        None => {
+            eprintln!("❌ Unknown command: {}", cmd_name);
+            eprintln!("Available commands:");
+            for (name, c) in commands {
+                eprintln!("    {} {}", name, c.usage);
+            }
+            exit(1);
         }
-    }
-    if args[2] == "new" {
-        let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
-        let mut notes: Notes = serde_json::from_str(&content).unwrap();
-
-        fs::write(tmpfile, String::new()).expect("Failed to create tempfile.");
-        open(tmpfile.to_string());
-        let content = fs::read_to_string(tmpfile).expect("Failed to read tempfile content.");
-
-        notes.notes.push(content);
-
-        fs::write(&filename, serde_json::to_string_pretty(&notes).unwrap())
-            .expect("Failed to write");
-        println!("Successfully created the note");
-    }
-    if args[2] == "edit" {
-        let index = args
-            .get(3)
-            .expect("Index required")
-            .parse::<usize>()
-            .expect("Index must be a number");
-
-        let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
-        let mut notes: Notes = serde_json::from_str(&content).unwrap();
-
-        fs::write(tmpfile, &notes.notes[index]).expect("Failed to create tempfile.");
-        open(tmpfile.to_string());
-        let content = fs::read_to_string(tmpfile).expect("Failed to read tempfile content.");
-
-        notes.notes[index] = content;
-
-        fs::write(&filename, serde_json::to_string_pretty(&notes).unwrap())
-            .expect("Failed to write");
-        println!("Successfully edited the note");
-    }
-    if args[2] == "delete" {
-        let index = args
-            .get(3)
-            .expect("Index required")
-            .parse::<usize>()
-            .expect("Index must be a number");
-
-        let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
-        let mut notes: Notes = serde_json::from_str(&content).unwrap();
-
-        notes.notes.remove(index);
-
-        fs::write(&filename, serde_json::to_string_pretty(&notes).unwrap())
-            .expect("Failed to write");
-        println!("Successfully deleted the note");
-    }
-    if args[2] == "search" {
-        let keyword = args.get(3).expect("Keyword(s) required.");
-
-        let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
-        let notes: Notes = serde_json::from_str(&content).unwrap();
-
-        let result = search_notes(&notes.notes, keyword);
-
-        println!(
-            "Search for \"{}\" returned {} results:",
-            keyword,
-            result.len()
-        );
-
-        for (i, note) in result {
-            let (title, _body) = note.split_once("\n").unwrap_or((note, ""));
-            println!("Note {}: {}...", i, title);
-        }
-    }
-    if args[2] == "read" {
-        let index = args
-            .get(3)
-            .expect("Index required")
-            .parse::<usize>()
-            .expect("Index must be a number");
-
-        let content = fs::read_to_string(&filename).expect("Failed to open the note file.");
-        let notes: Notes = serde_json::from_str(&content).unwrap();
-
-        println!("{}", &notes.notes[index]);
-    }
+    };
+    (command.func)((&filename).to_string(), (&args[3..]).to_vec());
 }
