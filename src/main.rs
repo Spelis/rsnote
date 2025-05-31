@@ -1,7 +1,6 @@
 use chrono::Local;
 use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 use std::process::Command as ProcCommand;
@@ -14,17 +13,24 @@ fn write_notes(file: &str, data: Notes) {
 
 fn read_notes(file: &str) -> Notes {
     let content = fs::read_to_string(file).expect("❌ Failed to read.");
-    return serde_json::from_str(&content).unwrap();
+    let json: Notes = serde_json::from_str(&content).expect("❌ File may be corrupted.");
+    return json;
 }
 
 fn trim_multiline(input: &str) -> String {
-    let lines = input.lines().collect::<Vec<_>>();
-    let first = lines.iter().position(|l| !l.trim().is_empty()).unwrap_or(0);
-    let last = lines
-        .iter()
-        .rposition(|l| !l.trim().is_empty())
-        .unwrap_or(0);
-    lines[first..=last].join("\n")
+    input
+        .lines()
+        .skip(1)
+        .skip_while(|l| l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .skip_while(|l| l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn input(prompt: &str) -> String {
@@ -37,10 +43,12 @@ fn input(prompt: &str) -> String {
     input.trim().to_string()
 }
 
+fn confirm(prompt: &str) -> bool {
+    input(prompt).eq_ignore_ascii_case("y")
+}
+
 fn open_editor(path: &std::path::Path) -> std::io::Result<()> {
-    let editors = [
-        "nvim", "vim", "nano", "vi", "edit", // Microsoft's new text editor
-    ];
+    let editors = ["nvim", "vim", "nano", "vi", "edit"];
 
     for editor in editors {
         if which::which(editor).is_ok() {
@@ -87,7 +95,7 @@ fn cmd_new(file: String, args: Vec<String>) {
         println!("❌ Did not create empty note.");
         return;
     }
-    let now = Local::now().timestamp() as u64;
+    let now = Local::now().timestamp();
     notes.0.push(Note {
         title: title.into(),
         body: body,
@@ -116,14 +124,10 @@ fn cmd_edit(file: String, args: Vec<String>) {
     let content = fs::read_to_string(tmp).expect("❌ Failed to read");
     let title = content.lines().next().unwrap_or("Untitled");
     let body = trim_multiline(&content);
-    if body == "<body>" && title == "<title>" {
-        println!("❌ Did not create empty note.");
-        return;
-    }
     note.title = title.to_string();
     note.body = body;
-    note.edited_at = Local::now().timestamp() as u64;
-    if input("Are you sure you want to edit? (y/N): ").eq_ignore_ascii_case("y") {
+    note.edited_at = Local::now().timestamp();
+    if confirm("Are you sure you want to edit? (y/N): ") {
         write_notes(&file, notes);
     }
     println!("✅ Successfully edited {}", id);
@@ -134,7 +138,7 @@ fn cmd_delete(file: String, args: Vec<String>) {
     let id = args
         .get(0)
         .expect("❌ ID Required, can be number or string.");
-    if input("Are you sure? (y/N): ").eq_ignore_ascii_case("y") {
+    if confirm("Are you sure? (y/N): ") {
         let noteidx = notes
             .0
             .iter()
@@ -237,6 +241,32 @@ fn cmd_info(file: String, args: Vec<String>) {
             .unwrap()
             .format("%Y-%m-%d %H:%M:%S")
     );
+    println!("    Tags: {}", note.tags.join(", "))
+}
+
+fn cmd_about(_file: String, _args: Vec<String>) {
+    println!("RSNote - Rust note taking app");
+    println!("Very simple Command line interface to manage notes.");
+    println!("\nMade by Spelis");
+}
+
+macro_rules! commands {
+    ( $( $name:expr => $func:ident $( ( $usage:expr ) )? ),* $(,)? ) => {{
+        let mut map = std::collections::HashMap::new();
+        $(
+            map.insert(
+                $name.to_string(),
+                Command {
+                    func: $func,
+                    usage: commands!(@usage $($usage)?),
+                },
+            );
+        )*
+        map
+    }};
+
+    (@usage $usage:expr) => { $usage.to_string() };
+    (@usage) => { "".to_string() };
 }
 
 #[derive(Serialize, Deserialize)]
@@ -244,8 +274,8 @@ struct Note {
     title: String,
     body: String,
     id: String,
-    created_at: u64,
-    edited_at: u64,
+    created_at: i64,
+    edited_at: i64,
     tags: Vec<String>,
 }
 
@@ -259,56 +289,16 @@ struct Notes(pub Vec<Note>);
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mut commands: HashMap<String, Command> = HashMap::new();
-    commands.insert(
-        "init".into(),
-        Command {
-            func: cmd_init,
-            usage: "".into(),
-        },
-    );
-    commands.insert(
-        "list".into(),
-        Command {
-            func: cmd_list,
-            usage: "".into(),
-        },
-    );
-    commands.insert(
-        "new".into(),
-        Command {
-            func: cmd_new,
-            usage: "<id>".into(),
-        },
-    );
-    commands.insert(
-        "edit".into(),
-        Command {
-            func: cmd_edit,
-            usage: "<id>".into(),
-        },
-    );
-    commands.insert(
-        "delete".into(),
-        Command {
-            func: cmd_delete,
-            usage: "<id>".into(),
-        },
-    );
-    commands.insert(
-        "search".into(),
-        Command {
-            func: cmd_search,
-            usage: "<query>".into(),
-        },
-    );
-    commands.insert(
-        "info".into(),
-        Command {
-            func: cmd_info,
-            usage: "<id>".into(),
-        },
-    );
+    let commands = commands! {
+        "init"   => cmd_init,
+        "list"   => cmd_list,
+        "new"    => cmd_new("id"),
+        "edit"   => cmd_edit("id"),
+        "delete" => cmd_delete("id"),
+        "search" => cmd_search("query"),
+        "info"   => cmd_info("id"),
+        "about"  => cmd_about(""),
+    };
     if args.len() <= 2 {
         eprintln!(
             "❌ Not enough arguments, you need at least 2. (you supplied {})",
@@ -317,7 +307,7 @@ fn main() {
         eprintln!("RSNote Usage: rsnote <file> <cmd> [opts]");
         eprintln!("Available commands:");
         for (name, command) in commands {
-            eprintln!("    {} {}", name, command.usage);
+            eprintln!("    {:<8} {}", name, command.usage);
         }
         exit(1);
     }
@@ -331,7 +321,7 @@ fn main() {
             eprintln!("❌ Unknown command: {}", cmd_name);
             eprintln!("Available commands:");
             for (name, c) in commands {
-                eprintln!("    {} {}", name, c.usage);
+                eprintln!("    {:<8} {}", name, c.usage);
             }
             exit(1);
         }
