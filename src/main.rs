@@ -32,6 +32,10 @@ fn trim_multiline(input: &str) -> String {
         .join("\n")
 }
 
+fn color(value: String, color: String) -> String {
+    return format!("\x1b[{}m{}\x1b[0m", color, value);
+}
+
 fn input(prompt: &str) -> String {
     let mut input = String::new();
     print!("{}", prompt);
@@ -220,9 +224,9 @@ fn cmd_search(file: String, args: Vec<String>) {
         .collect();
 
     println!(
-        "🔍 Search for \"{}\" returned {} results:",
-        query,
-        result.len()
+        "Search for {} returned {} results:",
+        color(format!("\"{}\"", query), "35".into()),
+        color(result.len().to_string(), "32".into())
     );
 
     for (_, note) in result {
@@ -316,6 +320,35 @@ fn cmd_toggletag(file: String, args: Vec<String>) {
     write_notes(&file, notes);
 }
 
+fn cmd_searchtag(file: String, args: Vec<String>) {
+    let notes = match read_notes(&file) {
+        Ok(notes) => notes,
+        Err(e) => {
+            eprintln!("Failed to read notes: {}", e);
+            return;
+        }
+    };
+    let tags = args;
+    let filtered = notes
+        .0
+        .into_iter()
+        .filter(|note| tags.iter().all(|tag| note.tags.contains(tag)))
+        .collect::<Vec<_>>();
+
+    println!(
+        "Tag search for {} returned {} results:",
+        color(format!("{}", tags.join(", ")), "35".into()),
+        color(filtered.len().to_string(), "32".into())
+    );
+
+    for note in filtered {
+        println!("{}: {}", &note.id, &note.title);
+        for line in note.body.lines() {
+            println!("    {}", line);
+        }
+    }
+}
+
 macro_rules! commands {
     ( $( $name:expr => $func:ident $( ( $usage:expr ) )? ),* $(,)? ) => {{
         let mut map = std::collections::HashMap::new();
@@ -364,7 +397,8 @@ fn main() {
         "search" => cmd_search("query"),
         "info"   => cmd_info("id"),
         "about"  => cmd_about(""),
-        "tag"    => cmd_toggletag("tag")
+        "tgtag"  => cmd_toggletag("id tag"),
+        "srchtag"  => cmd_searchtag("*tag")
     };
     if args.len() <= 2 {
         eprintln!(
