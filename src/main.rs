@@ -256,7 +256,7 @@ fn cmd_info(file: String, args: Vec<String>) {
         return;
     };
 
-    println!("ℹ️ Info for note {}:", note.id);
+    println!("Info for note {}:", note.id);
     println!("    Title: {}", note.title);
     println!("    Body:");
     for line in note.body.lines() {
