@@ -4,17 +4,16 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::io::Write;
 use std::process::Command as ProcCommand;
-use std::process::exit;
 use std::{env, fs};
 
 fn write_notes(file: &str, data: Notes) {
-    fs::write(&file, serde_json::to_string(&data).unwrap()).expect("❌ Failed to write.");
+    fs::write(&file, serde_json::to_string(&data).unwrap()).expect("Failed to write.");
 }
 
-fn read_notes(file: &str) -> Notes {
-    let content = fs::read_to_string(file).expect("❌ Failed to read.");
-    let json: Notes = serde_json::from_str(&content).expect("❌ File may be corrupted.");
-    return json;
+fn read_notes(file: &str) -> Result<Notes, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string(file)?;
+    let json = serde_json::from_str(&content)?;
+    Ok(json)
 }
 
 fn trim_multiline(input: &str) -> String {
@@ -39,7 +38,7 @@ fn input(prompt: &str) -> String {
     let _ = io::stdout().flush();
     io::stdin()
         .read_line(&mut input)
-        .expect("❌ Unable to read user input");
+        .expect("Unable to read user input");
     input.trim().to_string()
 }
 
@@ -58,41 +57,57 @@ fn open_editor(path: &std::path::Path) -> std::io::Result<()> {
     }
     Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
-        "❌ No suitable editor found in $PATH.",
+        "No suitable editor found in $PATH.",
     ))
 }
 
 fn cmd_init(file: String, _args: Vec<String>) {
-    fs::File::create(&file).expect("❌ Failed to create file.\n");
+    fs::File::create(&file).expect("Failed to create file.\n");
     let data = Notes(vec![]);
     write_notes(&file, data);
-    println!("✅ Notefile initialized: {}", &file);
+    println!("Notefile initialized: {}", &file);
 }
+
 fn cmd_list(file: String, _args: Vec<String>) {
-    let notes: Notes = read_notes(&file);
+    let notes = match read_notes(&file) {
+        Ok(notes) => notes,
+        Err(e) => {
+            eprintln!("Failed to read notes: {}", e);
+            return;
+        }
+    };
     for note in notes.0.iter() {
-        println!("Note {}: {}", &note.id, &note.title)
+        println!(
+            "Note {}: {} | ({})",
+            &note.id,
+            &note.title,
+            &note.tags.join(", ")
+        )
     }
 }
 fn cmd_new(file: String, args: Vec<String>) {
-    let mut notes: Notes = read_notes(&file);
-    let id = args
-        .get(0)
-        .expect("❌ ID Required, can be number or string.");
+    let mut notes = match read_notes(&file) {
+        Ok(notes) => notes,
+        Err(e) => {
+            eprintln!("Failed to read notes: {}", e);
+            return;
+        }
+    };
+    let id = args.get(0).expect("ID Required, can be number or string.");
 
     if notes.0.iter().any(|n| n.id == *id) {
-        eprintln!("❌ Note with id {} already exists.", id);
+        eprintln!("Note with id {} already exists.", id);
         return;
     }
 
-    let mut tmp = tempfile::NamedTempFile::new().expect("❌ failed to create temp file.");
-    writeln!(tmp, "<title>\n\n<body>").expect("❌ Failed to write");
-    open_editor(tmp.path()).expect("❌ Failed to open");
-    let content = fs::read_to_string(tmp).expect("❌ Failed to read");
+    let mut tmp = tempfile::NamedTempFile::new().expect("failed to create temp file.");
+    writeln!(tmp, "<title>\n\n<body>").expect("Failed to write");
+    open_editor(tmp.path()).expect("Failed to open");
+    let content = fs::read_to_string(tmp).expect("Failed to read");
     let title = content.lines().next().unwrap_or("Untitled");
     let body = trim_multiline(&content);
     if body == "<body>" && title == "<title>" {
-        println!("❌ Did not create empty note.");
+        println!("Did not create empty note.");
         return;
     }
     let now = Local::now().timestamp();
@@ -105,23 +120,27 @@ fn cmd_new(file: String, args: Vec<String>) {
         tags: vec![],
     });
     write_notes(&file, notes);
-    println!("✅ Successfully created {}", id);
+    println!("Successfully created {}", id);
 }
 fn cmd_edit(file: String, args: Vec<String>) {
-    let mut notes: Notes = read_notes(&file);
-    let id = args
-        .get(0)
-        .expect("❌ ID Required, can be number or string.");
+    let mut notes = match read_notes(&file) {
+        Ok(notes) => notes,
+        Err(e) => {
+            eprintln!("Failed to read notes: {}", e);
+            return;
+        }
+    };
+    let id = args.get(0).expect("ID Required, can be number or string.");
 
     let Some(note) = notes.0.iter_mut().find(|n| &n.id == id) else {
-        eprintln!("❌ Note with ID '{}' not found.", id);
+        eprintln!("Note with ID '{}' not found.", id);
         return;
     };
 
-    let mut tmp = tempfile::NamedTempFile::new().expect("❌ Failed to create temp file.");
-    writeln!(tmp, "{}\n\n{}", note.title, note.body).expect("❌ Failed to write");
-    open_editor(tmp.path()).expect("❌ Failed to open");
-    let content = fs::read_to_string(tmp).expect("❌ Failed to read");
+    let mut tmp = tempfile::NamedTempFile::new().expect("Failed to create temp file.");
+    writeln!(tmp, "{}\n\n{}", note.title, note.body).expect("Failed to write");
+    open_editor(tmp.path()).expect("Failed to open");
+    let content = fs::read_to_string(tmp).expect("Failed to read");
     let title = content.lines().next().unwrap_or("Untitled");
     let body = trim_multiline(&content);
     note.title = title.to_string();
@@ -130,34 +149,44 @@ fn cmd_edit(file: String, args: Vec<String>) {
     if confirm("Are you sure you want to edit? (y/N): ") {
         write_notes(&file, notes);
     }
-    println!("✅ Successfully edited {}", id);
+    println!("Successfully edited {}", id);
 }
 
 fn cmd_delete(file: String, args: Vec<String>) {
-    let mut notes: Notes = read_notes(&file);
-    let id = args
-        .get(0)
-        .expect("❌ ID Required, can be number or string.");
+    let mut notes = match read_notes(&file) {
+        Ok(notes) => notes,
+        Err(e) => {
+            eprintln!("Failed to read notes: {}", e);
+            return;
+        }
+    };
+    let id = args.get(0).expect("ID Required, can be number or string.");
     if confirm("Are you sure? (y/N): ") {
         let noteidx = notes
             .0
             .iter()
             .position(|n| &n.id == id)
-            .expect("❌ Note not found.");
+            .expect("Note not found.");
         notes.0.remove(noteidx);
         write_notes(&file, notes);
-        println!("✅ Successfully deleted {}", id);
+        println!("Successfully deleted {}", id);
     } else {
-        println!("✅ Canceled.");
+        println!("Canceled.");
     }
 }
 
 fn cmd_search(file: String, args: Vec<String>) {
-    let notes: Notes = read_notes(&file);
-    let query = args.get(0).map(|s| s.as_str()).unwrap_or("").to_lowercase();
+    let notes = match read_notes(&file) {
+        Ok(notes) => notes,
+        Err(e) => {
+            eprintln!("Failed to read notes: {}", e);
+            return;
+        }
+    };
+    let query = args.join(" ").to_lowercase();
 
     if query.is_empty() {
-        println!("❌ No query provided.");
+        println!("No query provided.");
         return;
     }
 
@@ -209,13 +238,17 @@ fn cmd_search(file: String, args: Vec<String>) {
 }
 
 fn cmd_info(file: String, args: Vec<String>) {
-    let mut notes: Notes = read_notes(&file);
-    let id = args
-        .get(0)
-        .expect("❌ ID Required, can be number or string.");
+    let mut notes = match read_notes(&file) {
+        Ok(notes) => notes,
+        Err(e) => {
+            eprintln!("Failed to read notes: {}", e);
+            return;
+        }
+    };
+    let id = args.get(0).expect("ID Required, can be number or string.");
 
     let Some(note) = notes.0.iter_mut().find(|n| &n.id == id) else {
-        eprintln!("❌ Note with ID '{}' not found.", id);
+        eprintln!("Note with ID '{}' not found.", id);
         return;
     };
 
@@ -247,7 +280,40 @@ fn cmd_info(file: String, args: Vec<String>) {
 fn cmd_about(_file: String, _args: Vec<String>) {
     println!("RSNote - Rust note taking app");
     println!("Very simple Command line interface to manage notes.");
+    println!("Licensed under MIT.");
     println!("\nMade by Spelis");
+}
+
+fn cmd_toggletag(file: String, args: Vec<String>) {
+    let mut notes = match read_notes(&file) {
+        Ok(notes) => notes,
+        Err(e) => {
+            eprintln!("Failed to read notes: {}", e);
+            return;
+        }
+    };
+    let id = args.get(0).expect("ID Required, can be number or string.");
+
+    let tag = args.get(1).expect("Tag Required.");
+
+    let Some(note) = notes.0.iter_mut().find(|n| &n.id == id) else {
+        eprintln!("Note with ID '{}' not found.", id);
+        return;
+    };
+
+    if note.tags.contains(tag) {
+        let Some(index) = note.tags.iter().position(|x| x == tag) else {
+            eprintln!("weird ass error idfk");
+            return;
+        };
+        note.tags.remove(index);
+        println!("Successfully removed tag {}", tag);
+    } else {
+        note.tags.push(tag.to_string());
+        println!("Successfully added tag {}", tag);
+    }
+
+    write_notes(&file, notes);
 }
 
 macro_rules! commands {
@@ -298,10 +364,11 @@ fn main() {
         "search" => cmd_search("query"),
         "info"   => cmd_info("id"),
         "about"  => cmd_about(""),
+        "tag"    => cmd_toggletag("tag")
     };
     if args.len() <= 2 {
         eprintln!(
-            "❌ Not enough arguments, you need at least 2. (you supplied {})",
+            "Not enough arguments, you need at least 2. (you supplied {})",
             args.len() - 1
         );
         eprintln!("RSNote Usage: rsnote <file> <cmd> [opts]");
@@ -309,21 +376,21 @@ fn main() {
         for (name, command) in commands {
             eprintln!("    {:<8} {}", name, command.usage);
         }
-        exit(1);
+        return;
     }
     let filename = args
         .get(1)
         .expect("No filename (weird, this should NEVER happen)");
-    let cmd_name = args.get(2).expect("❌ No command provided.");
+    let cmd_name = args.get(2).expect("No command provided.");
     let command = match commands.get(cmd_name) {
         Some(c) => c,
         None => {
-            eprintln!("❌ Unknown command: {}", cmd_name);
+            eprintln!("Unknown command: {}", cmd_name);
             eprintln!("Available commands:");
             for (name, c) in commands {
                 eprintln!("    {:<8} {}", name, c.usage);
             }
-            exit(1);
+            return;
         }
     };
     (command.func)((&filename).to_string(), (&args[3..]).to_vec());
