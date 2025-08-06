@@ -9,3 +9,7 @@ serde_json = "1"
 tempfile = "3"
 which = "6"
 chrono = "0.4"
+clap = { version = "4.5.40", features = ["derive"] }
+tabled = "0.20.0"
+bincode = { version = "2.0.1", features = ["serde"] }
+humantime = "2.2.0"
