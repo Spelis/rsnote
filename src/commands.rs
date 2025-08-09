@@ -170,8 +170,3 @@ pub mod mutate {
 		_ = write_notefile(&file, notes);
 	}
 }
-
-pub mod crypt {
-	// pub fn en(file: String, id: String, pass: String) {}
-	// pub fn de(file: String, id: String, pass: String) {}
-}

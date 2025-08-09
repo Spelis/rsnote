@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use sodiumoxide::init;
 
 mod commands;
 mod helpers;
@@ -31,10 +32,6 @@ enum Command {
 	ToggleTag { id: String, tag: String },
 	/// Search through notes by *TAG
 	SearchTag { tag: Vec<String> },
-	// /// Encrypt note at ID with PASS
-	// Encrypt { id: String, pass: String },
-	// /// Decrypt note at ID with PASS
-	// Decrypt { id: String, pass: String },
 }
 
 fn main() {
@@ -50,8 +47,6 @@ fn main() {
 		Command::Info { id } => commands::mutate::info(args.file, id),
 		Command::ToggleTag { id, tag } => commands::mutate::toggle_tag(args.file, id, tag),
 		Command::SearchTag { tag } => commands::search_tag(args.file, tag),
-		// Command::Encrypt { id, pass } => commands::crypt::en(args.file, id, pass),
-		// Command::Decrypt { id, pass } => commands::crypt::de(args.file, id, pass),
 	}
 	let end = chrono::Local::now();
 	println!(
