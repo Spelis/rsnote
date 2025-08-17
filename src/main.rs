@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use sodiumoxide::init;
 
 mod commands;
 mod helpers;
